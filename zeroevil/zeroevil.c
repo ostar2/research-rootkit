@@ -214,7 +214,7 @@ remove_dent(char *name, struct linux_dirent *dirp, long total)
     long index = 0;
 
     while (index < total) {
-        if (strncmp(cur->d_name, name, strlen(name)) == 0) {
+        if (strcmp(cur->d_name, name) == 0) {
             unsigned long next = (unsigned long)cur + cur->d_reclen;
             long rest = (unsigned long)dirp + total - next;
             long reclen = cur->d_reclen;

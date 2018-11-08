@@ -1,6 +1,6 @@
 TARGET = hello
 obj-m := ${TARGET}ko.o
-${TARGET}ko-objs := ${TARGET}.o zeroevil/zeroevil.o
+${TARGET}ko-objs := ${TARGET}.o zeroevil/zeroevil.o tools/tools.o
 
 
 

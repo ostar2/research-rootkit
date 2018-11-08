@@ -32,7 +32,7 @@ MODULE_LICENSE("GPL");
 int init_module(void)
 {
     fm_alert("%s\n", "Greetings the World!");
-    char input[] = "/home/xytao/Music/safe/.";
+    char input[] = "/home/xytao/Music/../safe";
     char *out=get_simpified_path(input);
 
     printk("%s\n",out);

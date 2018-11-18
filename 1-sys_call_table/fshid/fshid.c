@@ -180,10 +180,10 @@ asmlinkage long fake_lstat(const char __user *filename, struct __old_kernel_stat
 asmlinkage long fake_rename(const char __user *oldname, const char __user *newname)
 {
     
-    if ( isTarget(get_simpified_path(get_absolute_path(oldname)))||
-        isTarget(get_simpified_path(get_absolute_path(newname))) && 
+    if ( (isTarget(get_simpified_path(get_absolute_path(oldname)))||
+        isTarget(get_simpified_path(get_absolute_path(newname)))) && 
         !is_process_valid()) 
-    {
+    {	
         fm_alert("rename: %s,%s\n", oldname,newname);
         return -1;
     }

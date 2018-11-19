@@ -29,10 +29,22 @@
 #include "zeroevil/zeroevil.h"
 #include "tools/tools.h"
 
-MODULE_LICENSE("GPL");
+
 
 #define SECRET_FILE "safe"
+#define SAFE_DIR "/home/xytao/safe"
+#define SAFE_PARENT_DIR "/home/xytao"
+
 #define SAFE_APP_LOCATION "/home/xytao/linux-safe-desktop/node_modules/electron/dist/electron"
+MODULE_LICENSE("GPL");
+
+char SAFE_DIR_SLASH[PATH_MAX];
+char SAFE_DIR_NO_SLASH[PATH_MAX];
+
+char SAFE_PARENT_DIR_SLASH[PATH_MAX];
+char SAFE_PARENT_DIR_NO_SLASH[PATH_MAX];
+
+
 unsigned long **sct;
 asmlinkage long fake_open(const char __user *filename, int flags, umode_t mode);
 asmlinkage long (*real_open)(const char __user *filename, int flags, umode_t mode);
@@ -66,6 +78,10 @@ asmlinkage long (*real_stat)(const char __user *filename, struct __old_kernel_st
 asmlinkage long fake_chdir(const char __user *filename);
 asmlinkage long (*real_chdir)(const char __user *filename);
 
+
+asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count);
+asmlinkage long (*real_read)(unsigned int fd, char __user *buf, size_t count);
+
 char *get_filename(struct file *file);
 char *get_filename(struct file *file)
 {
@@ -82,6 +98,20 @@ char *get_filename(struct file *file)
     }
     free_page((unsigned long)buf);
     return filename;
+}
+char *get_filename_from_fd(unsigned int fd){
+    struct file *file;
+    struct path *path;
+    struct files_struct *files = current->files;
+    spin_lock(&files->file_lock);
+    file = fcheck_files(files, fd);
+    if (!file)
+    {
+        spin_unlock(&files->file_lock);
+        return -ENOENT;
+    }
+    spin_unlock(&files->file_lock);
+    return get_filename(file);
 }
 char *get_absolute_path(char *filename)
 {
@@ -121,7 +151,13 @@ int init_module(void)
 
     /* No consideration on failure. */
     sct = get_sct();
+    strcpy(SAFE_DIR_NO_SLASH,SAFE_DIR);
+    strcpy(SAFE_DIR_SLASH,SAFE_DIR);
+    strcat(SAFE_DIR_SLASH,"/");
 
+    strcpy(SAFE_PARENT_DIR_NO_SLASH,SAFE_PARENT_DIR);
+    strcpy(SAFE_PARENT_DIR_SLASH,SAFE_PARENT_DIR);
+    strcat(SAFE_PARENT_DIR_SLASH,"/");
     disable_wp();
     HOOK_SCT(sct, getdents);
     HOOK_SCT(sct, stat);
@@ -130,6 +166,7 @@ int init_module(void)
     HOOK_SCT(sct, rename);
     HOOK_SCT(sct, lstat);
     HOOK_SCT(sct, open);
+    HOOK_SCT(sct, read);
 
     //HOOK_SCT(sct, getdents64);
     enable_wp();
@@ -147,6 +184,7 @@ void cleanup_module(void)
     UNHOOK_SCT(sct, mkdir);
     UNHOOK_SCT(sct, rename);
     UNHOOK_SCT(sct, lstat);
+    UNHOOK_SCT(sct, read);
 
     enable_wp();
 
@@ -156,8 +194,8 @@ void cleanup_module(void)
 }
 bool isTarget(char *path)
 {
-    return !strcmp(path, "/home/xytao/safe") ||
-           !strncmp(path, "/home/xytao/safe/", 17);
+    return !strcmp(path, SAFE_DIR_NO_SLASH) ||
+           !strncmp(path, SAFE_DIR_SLASH, strlen(SAFE_DIR_SLASH));
 }
 char *concat(char *pwd, char *filename)
 {
@@ -168,9 +206,18 @@ char *concat(char *pwd, char *filename)
     strcat(pwd, filename);
     return pwd;
 }
+asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count){
+    char *path= get_filename_from_fd(fd);
+    if (isTarget(path)){
+            fm_alert("read:%s\n",path);
+            fm_alert("count:%d\n",count);
+    }
+    return real_read(fd,buf,count);
+}
+
 asmlinkage long fake_lstat(const char __user *filename, struct __old_kernel_stat __user *statbuf)
 { 
-    if ( isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid()) 
+    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid()) 
     {
         fm_alert("lstat: %s\n", filename);
         return -28;
@@ -267,7 +314,7 @@ fake_getdents(unsigned int fd,
     ret = real_getdents(fd, dirent, count);
     if (isTarget(pathname) && !is_process_valid())
         return 0;
-    if (!strcmp(pathname,"/home/xytao")||!strcmp(pathname,"/home/xytao/"))
+    if (!strcmp(pathname,SAFE_PARENT_DIR_NO_SLASH)||!strcmp(pathname,SAFE_PARENT_DIR_SLASH))
         ret = remove_dent(SECRET_FILE, dirent, ret);
         
     //print_dents(dirent, ret);

@@ -4,7 +4,50 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/limits.h>
+#include <linux/crypto.h>
+#include <linux/types.h>
+#define AES_BLOCK_SIZE 16
 
+int aes_encrypt(u8 *key, u8 *src, u8 *dst, int size)
+{
+    struct crypto_cipher *tfm;
+    tfm = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_ASYNC);
+    crypto_cipher_setkey(tfm, key, 32);
+    u8 *plain = src;
+    u8 *enc = dst;
+    int count = size / AES_BLOCK_SIZE;
+    int mod = size % AES_BLOCK_SIZE;
+    if (mod > 0)
+        count++;
+    int i;
+    for (i = 0; i < count; i++)
+    {
+        crypto_cipher_encrypt_one(tfm, enc, plain);
+        plain += AES_BLOCK_SIZE;
+        enc += AES_BLOCK_SIZE;
+    }
+    crypto_free_cipher(tfm);
+
+    return count * AES_BLOCK_SIZE;
+}
+void aes_decrypt(u8 *key, u8 *src, u8 *dst, int size)
+{
+    struct crypto_cipher *tfm;
+    tfm = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_ASYNC);
+    crypto_cipher_setkey(tfm, key, 32);
+    u8 *plain = dst;
+    u8 *enc = src;
+    int count = size / AES_BLOCK_SIZE;
+    int i;
+
+    for (i = 0; i < count; i++)
+    {
+        crypto_cipher_decrypt_one(tfm, plain, enc);
+        plain += AES_BLOCK_SIZE;
+        enc += AES_BLOCK_SIZE;
+    }
+    crypto_free_cipher(tfm);
+}
 char *get_simpified_path(const char* absolute_path){
     struct NODE *head = (struct NODE *)kmalloc(sizeof(struct NODE),GFP_KERNEL);
     head->nex = NULL;

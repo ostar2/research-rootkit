@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "crypto.h": "c",
+        "random.h": "c",
+        "limits.h": "c",
+        "tools.h": "c"
+    }
+}

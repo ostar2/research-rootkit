@@ -21,21 +21,56 @@
 #ifndef CPP
 #include <linux/module.h>
 #include <linux/kernel.h>
+
+
 #include <linux/slab.h>
 
 #endif // CPP
 
 #include "zeroevil/zeroevil.h"
 #include "tools/tools.h"
+#include <linux/random.h>
+
 MODULE_LICENSE("GPL");
 
-int init_module(void)
+int init_module(void) 
+
 {
     fm_alert("%s\n", "Greetings the World!");
-    char input[] = "/home/xytao/Music/safe/.";
-    char *out=get_simpified_path(input);
+    u8 *key = kmalloc(32, GFP_KERNEL);
+    u8 *src = kmalloc(65536, GFP_KERNEL);
+    u8 *dest = kmalloc(65536, GFP_KERNEL);
+    u8 *dest2 = kmalloc(65536, GFP_KERNEL);
+    int size = 65536;
+    get_random_bytes(src, size);
+    get_random_bytes(key, 32);
+    fm_alert("Start Encyption\n");
+    int size_d = aes_encrypt(key, src, dest, size);
+    fm_alert("Encyption finished\n");
+    fm_alert("Start Decryption\n");
+    aes_decrypt(key, dest, dest2, size_d);
+    fm_alert("Decryption finished\n");
 
-    printk("%s\n",out);
+    /*
+    int i;
+    printk("\nplain:");
+    for (i = 0; i < size; i++)
+        pr_cont("%x", src[i]);
+
+    printk("\nencry:");
+    for (i = 0; i < size_d; i++)
+        pr_cont("%x", dest[i]);
+
+    printk("\ndecry:");
+    for (i = 0; i < size; i++)
+        pr_cont("%x", dest2[i]);
+    printk("\n");*/
+
+    if (!memcmp(src, dest2, size))
+    {
+        printk("Success!\n");
+    }
+
     return 0;
 }
 

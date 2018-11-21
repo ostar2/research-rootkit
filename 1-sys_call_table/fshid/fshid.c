@@ -26,14 +26,19 @@
 #include <linux/fdtable.h>
 #include <linux/syscalls.h>
 #include <linux/fs_struct.h>
+#include <net/sock.h>
+#include <linux/netlink.h>
+#include <linux/skbuff.h>
+#include <linux/proc_fs.h>
+#include <linux/pid.h>
+
 #include "zeroevil/zeroevil.h"
 #include "tools/tools.h"
-
-
 
 #define SECRET_FILE "safe"
 #define SAFE_DIR "/home/xytao/safe"
 #define SAFE_PARENT_DIR "/home/xytao"
+#define NETLINK_USER 31
 
 #define SAFE_APP_LOCATION "/home/xytao/linux-safe-desktop/node_modules/electron/dist/electron"
 MODULE_LICENSE("GPL");
@@ -44,8 +49,16 @@ char SAFE_DIR_NO_SLASH[PATH_MAX];
 char SAFE_PARENT_DIR_SLASH[PATH_MAX];
 char SAFE_PARENT_DIR_NO_SLASH[PATH_MAX];
 
-
+struct sock *nl_sk = NULL;
+struct Message *message;
 unsigned long **sct;
+asmlinkage long fake_link(const char __user *oldname,
+                          const char __user *newname);
+asmlinkage long fake_unlink(const char __user *pathname);
+asmlinkage long (*real_unlink)(const char __user *pathname);
+
+asmlinkage long (*real_link)(const char __user *oldname,
+                             const char __user *newname);
 asmlinkage long fake_open(const char __user *filename, int flags, umode_t mode);
 asmlinkage long (*real_open)(const char __user *filename, int flags, umode_t mode);
 asmlinkage long fake_mkdir(const char __user *pathname, umode_t mode);
@@ -78,11 +91,13 @@ asmlinkage long (*real_stat)(const char __user *filename, struct __old_kernel_st
 asmlinkage long fake_chdir(const char __user *filename);
 asmlinkage long (*real_chdir)(const char __user *filename);
 
-
 asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count);
 asmlinkage long (*real_read)(unsigned int fd, char __user *buf, size_t count);
 
+asmlinkage long fake_write(unsigned int fd, const char __user *buf, size_t count);
+asmlinkage long (*real_write)(unsigned int fd, char __user *buf, size_t count);
 char *get_filename(struct file *file);
+
 char *get_filename(struct file *file)
 {
     char *buf = (char *)__get_free_page(GFP_KERNEL);
@@ -99,7 +114,8 @@ char *get_filename(struct file *file)
     free_page((unsigned long)buf);
     return filename;
 }
-char *get_filename_from_fd(unsigned int fd){
+char *get_filename_from_fd(unsigned int fd)
+{
     struct file *file;
     struct path *path;
     struct files_struct *files = current->files;
@@ -134,9 +150,9 @@ char *get_absolute_path(char *filename)
     }
     return y;
 }
-bool is_process_valid(void)
+bool is_process_valid(struct task_struct *ts)
 {
-    struct task_struct *ts = current;
+
     while (ts->pid != 1)
     {
         if (!strcmp(get_filename(ts->mm->exe_file), SAFE_APP_LOCATION))
@@ -145,20 +161,87 @@ bool is_process_valid(void)
     }
     return false;
 }
+struct task_struct *get_struct_task_from_pid(int pid)
+{
+    struct pid *pid_struct;
+    pid_struct = find_get_pid(pid);
+    return pid_task(pid_struct, PIDTYPE_PID);
+}
+static void on_receive(struct sk_buff *skb)
+{
+
+    struct nlmsghdr *nlh;
+    int pid;
+    struct sk_buff *skb_out;
+    int msg_size;
+    int res;
+    struct task_struct *task;
+
+    printk(KERN_INFO "Entering: %s\n", __FUNCTION__);
+
+    msg_size = sizeof(struct Message);
+    nlh = (struct nlmsghdr *)skb->data;
+    pid = nlh->nlmsg_pid;
+
+    printk("pid%d\n", pid);
+    printk("valid%d\n", is_process_valid(get_struct_task_from_pid(pid)));
+
+    message = (struct Message *)nlmsg_data(nlh);
+    printk("%d\n", message->type);
+    printk("%s\n", message->filename);
+    printk("%s\n", message->password);
+    message->type = 4;
+
+    skb_out = nlmsg_new(msg_size, 0);
+    if (!skb_out)
+    {
+        printk(KERN_ERR "Failed to allocate new skb\n");
+        return;
+    }
+
+    nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, msg_size, 0);
+    NETLINK_CB(skb_out).dst_group = 0;
+    memcpy(nlmsg_data(nlh), message, msg_size);
+
+    res = nlmsg_unicast(nl_sk, skb_out, pid);
+    if (res < 0)
+        printk(KERN_INFO "Error while sending bak to user\n");
+}
+int init_netlink(void)
+{
+    struct netlink_kernel_cfg cfg = {
+        .input = on_receive,
+    };
+
+    nl_sk = netlink_kernel_create(&init_net, NETLINK_USER, &cfg);
+    if (!nl_sk)
+        return -10;
+    else
+        return 0;
+}
+void set_safedir(void)
+{
+    strcpy(SAFE_DIR_NO_SLASH, SAFE_DIR);
+    strcpy(SAFE_DIR_SLASH, SAFE_DIR);
+    strcat(SAFE_DIR_SLASH, "/");
+
+    strcpy(SAFE_PARENT_DIR_NO_SLASH, SAFE_PARENT_DIR);
+    strcpy(SAFE_PARENT_DIR_SLASH, SAFE_PARENT_DIR);
+    strcat(SAFE_PARENT_DIR_SLASH, "/");
+}
 int init_module(void)
 {
     fm_alert("%s\n", "Greetings the World!");
-
+    if (init_netlink() < 0)
+        printk(KERN_ALERT "Error creating socket.\n");
+    set_safedir();
     /* No consideration on failure. */
     sct = get_sct();
-    strcpy(SAFE_DIR_NO_SLASH,SAFE_DIR);
-    strcpy(SAFE_DIR_SLASH,SAFE_DIR);
-    strcat(SAFE_DIR_SLASH,"/");
-
-    strcpy(SAFE_PARENT_DIR_NO_SLASH,SAFE_PARENT_DIR);
-    strcpy(SAFE_PARENT_DIR_SLASH,SAFE_PARENT_DIR);
-    strcat(SAFE_PARENT_DIR_SLASH,"/");
     disable_wp();
+    /*
+    HOOK_SCT(sct, link);
+    HOOK_SCT(sct, unlink);
+
     HOOK_SCT(sct, getdents);
     HOOK_SCT(sct, stat);
     HOOK_SCT(sct, chdir);
@@ -166,7 +249,9 @@ int init_module(void)
     HOOK_SCT(sct, rename);
     HOOK_SCT(sct, lstat);
     HOOK_SCT(sct, open);
+    */
     HOOK_SCT(sct, read);
+    HOOK_SCT(sct, write);
 
     //HOOK_SCT(sct, getdents64);
     enable_wp();
@@ -176,7 +261,11 @@ int init_module(void)
 
 void cleanup_module(void)
 {
+    netlink_kernel_release(nl_sk);
     disable_wp();
+    /*
+    UNHOOK_SCT(sct, link);
+    UNHOOK_SCT(sct, unlink);
     UNHOOK_SCT(sct, getdents);
     UNHOOK_SCT(sct, stat);
     UNHOOK_SCT(sct, chdir);
@@ -184,7 +273,9 @@ void cleanup_module(void)
     UNHOOK_SCT(sct, mkdir);
     UNHOOK_SCT(sct, rename);
     UNHOOK_SCT(sct, lstat);
+    */
     UNHOOK_SCT(sct, read);
+    UNHOOK_SCT(sct, write);
 
     enable_wp();
 
@@ -206,18 +297,57 @@ char *concat(char *pwd, char *filename)
     strcat(pwd, filename);
     return pwd;
 }
-asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count){
-    char *path= get_filename_from_fd(fd);
-    if (isTarget(path)){
-            fm_alert("read:%s\n",path);
-            fm_alert("count:%d\n",count);
-    }
-    return real_read(fd,buf,count);
+asmlinkage long
+fake_unlink(const char __user *pathname)
+{
+    if (isTarget(pathname))
+        fm_alert("unlink: %s\n", pathname);
+
+    return real_unlink(pathname);
 }
 
+asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count)
+{
+    char *path = get_filename_from_fd(fd);
+    if (isTarget(path))
+    {
+        int i;
+        long ret = real_read(fd, buf, count);
+        single_encrypt(NULL,buf, buf, ret);
+        fm_alert("read:%s\n", path);
+        fm_alert("count:%d\n", count);
+        return ret;
+    }
+    return real_read(fd, buf, count);
+}
+asmlinkage long fake_write(unsigned int fd, const char __user *buf, size_t count)
+{   
+    char *path = get_filename_from_fd(fd);
+    if (isTarget(path))
+    {   int i;
+        char *decrypted = kmalloc(count, GFP_KERNEL);
+        single_decrypt(NULL,buf, decrypted, count);
+        //(struct NODE *)kmalloc(sizeof(struct NODE), GFP_KERNEL)
+        mm_segment_t old_fs;
+        old_fs = get_fs();
+        set_fs(KERNEL_DS);
+        long ret = real_write(fd, decrypted, count);
+        set_fs(old_fs);
+        fm_alert("write:count %d, return %d", count, ret);
+        fm_alert("write:%s\n", path);
+        return ret;
+    }
+    return real_write(fd, buf, count);
+}
+asmlinkage long fake_link(const char __user *oldname,
+                          const char __user *newname)
+{
+    fm_alert("link: %s,%s\n", oldname, newname);
+    return real_link(oldname, newname);
+}
 asmlinkage long fake_lstat(const char __user *filename, struct __old_kernel_stat __user *statbuf)
-{ 
-    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid()) 
+{
+    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid(current))
     {
         fm_alert("lstat: %s\n", filename);
         return -28;
@@ -226,12 +356,12 @@ asmlinkage long fake_lstat(const char __user *filename, struct __old_kernel_stat
 }
 asmlinkage long fake_rename(const char __user *oldname, const char __user *newname)
 {
-    
-    if ( (isTarget(get_simpified_path(get_absolute_path(oldname)))||
-        isTarget(get_simpified_path(get_absolute_path(newname)))) && 
-        !is_process_valid()) 
-    {	
-        fm_alert("rename: %s,%s\n", oldname,newname);
+
+    if ((isTarget(get_simpified_path(get_absolute_path(oldname))) ||
+         isTarget(get_simpified_path(get_absolute_path(newname)))) &&
+        !is_process_valid(current))
+    {
+        fm_alert("rename: %s,%s\n", oldname, newname);
         return -1;
     }
     return real_rename(oldname, newname);
@@ -239,8 +369,8 @@ asmlinkage long fake_rename(const char __user *oldname, const char __user *newna
 
 asmlinkage long fake_mkdir(const char __user *pathname, umode_t mode)
 {
-    
-    if ( isTarget(get_simpified_path(get_absolute_path(pathname))) && !is_process_valid())
+
+    if (isTarget(get_simpified_path(get_absolute_path(pathname))) && !is_process_valid(current))
     {
         fm_alert("mkdir: %s\n", pathname);
         return -25;
@@ -252,7 +382,7 @@ asmlinkage long fake_mkdir(const char __user *pathname, umode_t mode)
 asmlinkage long fake_open(const char __user *filename, int flags, umode_t mode)
 {
 
-    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid())
+    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid(current))
     {
         fm_alert("open: %s\n", filename);
         return -2;
@@ -262,7 +392,7 @@ asmlinkage long fake_open(const char __user *filename, int flags, umode_t mode)
 }
 asmlinkage long fake_chdir(const char __user *filename)
 {
-    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid())
+    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid(current))
     {
         return -2;
     }
@@ -270,7 +400,7 @@ asmlinkage long fake_chdir(const char __user *filename)
 }
 asmlinkage long fake_stat(const char __user *filename, struct __old_kernel_stat __user *statbuf)
 {
-    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid())
+    if (isTarget(get_simpified_path(get_absolute_path(filename))) && !is_process_valid(current))
     {
         return -2;
     }
@@ -312,11 +442,11 @@ fake_getdents(unsigned int fd,
 
     long ret;
     ret = real_getdents(fd, dirent, count);
-    if (isTarget(pathname) && !is_process_valid())
+    if (isTarget(pathname) && !is_process_valid(current))
         return 0;
-    if (!strcmp(pathname,SAFE_PARENT_DIR_NO_SLASH)||!strcmp(pathname,SAFE_PARENT_DIR_SLASH))
+    if (!strcmp(pathname, SAFE_PARENT_DIR_NO_SLASH) || !strcmp(pathname, SAFE_PARENT_DIR_SLASH))
         ret = remove_dent(SECRET_FILE, dirent, ret);
-        
+
     //print_dents(dirent, ret);
     //print_dents(dirent, ret);
 

@@ -1,0 +1,11 @@
+#ifndef TOOLS
+#define TOOLS
+
+struct node
+{
+    char *s;
+    struct node *nex;
+    struct node *pre;
+};
+char *get_simpified_path(const char* absolute_path);
+#endif

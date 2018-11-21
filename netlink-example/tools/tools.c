@@ -7,22 +7,6 @@
 #include <linux/crypto.h>
 #include <linux/types.h>
 #define AES_BLOCK_SIZE 16
-void single_encrypt(char *key, char *src, char *dst, long length)
-{
-    long i;
-    for (i = 0; i < length; i++)
-    {
-        dst[i] = (src[i] + 1) % 256;
-    }
-}
-void single_decrypt(char *key, char *src, char *dst, long length)
-{
-    long i;
-    for (i = 0; i < length; i++)
-    {
-        dst[i] = (src[i] - 1) % 256;
-    }
-}
 
 int aes_encrypt(u8 *key, u8 *src, u8 *dst, int size)
 {
@@ -64,9 +48,8 @@ void aes_decrypt(u8 *key, u8 *src, u8 *dst, int size)
     }
     crypto_free_cipher(tfm);
 }
-char *get_simpified_path(const char *absolute_path)
-{
-    struct NODE *head = (struct NODE *)kmalloc(sizeof(struct NODE), GFP_KERNEL);
+char *get_simpified_path(const char* absolute_path){
+    struct NODE *head = (struct NODE *)kmalloc(sizeof(struct NODE),GFP_KERNEL);
     head->nex = NULL;
     head->pre = NULL;
     struct NODE *tail = head;
@@ -85,8 +68,8 @@ char *get_simpified_path(const char *absolute_path)
         temp[j] = '\0';
 
         //赋值
-        struct NODE *p = (struct NODE *)kmalloc(sizeof(struct NODE), GFP_KERNEL);
-        p->s = (char *)kmalloc(strlen(temp) + 1, GFP_KERNEL);
+        struct NODE *p = (struct NODE *)kmalloc(sizeof(struct NODE),GFP_KERNEL);
+        p->s = (char *)kmalloc(strlen(temp)+1,GFP_KERNEL);
         strcpy(p->s, temp);
 
         //尾插
@@ -125,18 +108,14 @@ char *get_simpified_path(const char *absolute_path)
                 kfree(k);
             }
         }
-        else if (strcmp(p->nex->s, ".") == 0)
-        {
-            struct NODE *q = p->nex;
-            if (q->nex != NULL)
-            {
-                p->nex = q->nex;
-                q->nex->pre = p;
+        else if(strcmp(p->nex->s,".")==0){
+            struct NODE *q=p->nex;
+            if(q->nex!=NULL){
+                p->nex=q->nex;
+                q->nex->pre=p;
                 kfree(q);
-            }
-            else
-            {
-                p->nex = NULL;
+            }else{
+                p->nex=NULL;
                 kfree(q);
             }
         }
@@ -148,11 +127,11 @@ char *get_simpified_path(const char *absolute_path)
     }
     struct NODE *a = head->nex;
     char out[PATH_MAX];
-    out[0] = '\0';
+    out[0]='\0';
     while (a != NULL)
-    {
-        strcat(out, "/");
-        strcat(out, a->s);
+    {   
+        strcat(out,"/");
+        strcat(out,a->s);
         a = a->nex;
     }
     return out;

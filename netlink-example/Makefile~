@@ -1,6 +1,6 @@
 TARGET = netlink
 obj-m := ${TARGET}ko.o
-${TARGET}ko-objs := ${TARGET}.o tools/tools.o
+${TARGET}ko-objs := ${TARGET}.o 
 
 default:
 	${MAKE} modules \

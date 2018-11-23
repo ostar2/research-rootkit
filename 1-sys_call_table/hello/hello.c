@@ -32,45 +32,17 @@
 #include <linux/random.h>
 
 MODULE_LICENSE("GPL");
-
+#define N 256
 int init_module(void) 
 
 {
-    fm_alert("%s\n", "Greetings the World!");
-    u8 *key = kmalloc(32, GFP_KERNEL);
-    u8 *src = kmalloc(65536, GFP_KERNEL);
-    u8 *dest = kmalloc(65536, GFP_KERNEL);
-    u8 *dest2 = kmalloc(65536, GFP_KERNEL);
-    int size = 65536;
-    get_random_bytes(src, size);
-    get_random_bytes(key, 32);
-    fm_alert("Start Encyption\n");
-    int size_d = aes_encrypt(key, src, dest, size);
-    fm_alert("Encyption finished\n");
-    fm_alert("Start Decryption\n");
-    aes_decrypt(key, dest, dest2, size_d);
-    fm_alert("Decryption finished\n");
-
-    /*
     int i;
-    printk("\nplain:");
-    for (i = 0; i < size; i++)
-        pr_cont("%x", src[i]);
-
-    printk("\nencry:");
-    for (i = 0; i < size_d; i++)
-        pr_cont("%x", dest[i]);
-
-    printk("\ndecry:");
-    for (i = 0; i < size; i++)
-        pr_cont("%x", dest2[i]);
-    printk("\n");*/
-
-    if (!memcmp(src, dest2, size))
-    {
-        printk("Success!\n");
-    }
-
+    char plain[N]="happy";
+    char e[N];
+    char d[N];
+    single_encrypt("te2st", plain,e, N);
+    single_decrypt("te2st", e, d, N);
+    printk("%s\n",d);
     return 0;
 }
 

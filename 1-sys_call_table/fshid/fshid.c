@@ -40,7 +40,7 @@
 #define SAFE_PARENT_DIR "/home/xytao"
 #define ALLOWED_UID 1000
 #define NETLINK_USER 31
-
+#define DEFAULT_PASS "TEST"
 #define SAFE_APP_LOCATION "/home/xytao/linux-safe-desktop/node_modules/electron/dist/electron"
 MODULE_LICENSE("GPL");
 
@@ -53,6 +53,14 @@ char SAFE_PARENT_DIR_NO_SLASH[PATH_MAX];
 struct sock *nl_sk = NULL;
 struct Message *message;
 unsigned long **sct;
+asmlinkage long fake_pwrite64(unsigned int fd, const char __user *buf,
+                              size_t count, loff_t pos);
+asmlinkage long (*real_pwrite64)(unsigned int fd, const char __user *buf,
+                                 size_t count, loff_t pos);
+asmlinkage long fake_pread64(unsigned int fd, char __user *buf,
+                             size_t count, loff_t pos);
+asmlinkage long (*real_pread64)(unsigned int fd, char __user *buf,
+                                size_t count, loff_t pos);
 asmlinkage long fake_link(const char __user *oldname,
                           const char __user *newname);
 asmlinkage long fake_unlink(const char __user *pathname);
@@ -223,7 +231,10 @@ int init_netlink(void)
     if (!nl_sk)
         return -10;
     else
+    {
+        printk(KERN_INFO "Init Finished\n");
         return 0;
+    }
 }
 void set_safedir(void)
 {
@@ -257,6 +268,7 @@ int init_module(void)
     HOOK_SCT(sct, lstat);
     HOOK_SCT(sct, open);
     */
+    HOOK_SCT(sct, pread64);
     HOOK_SCT(sct, read);
     HOOK_SCT(sct, write);
 
@@ -279,9 +291,10 @@ void cleanup_module(void)
     UNHOOK_SCT(sct, chdir);
     UNHOOK_SCT(sct, open);
     UNHOOK_SCT(sct, mkdir);
-    UNHOOK_SCT(sct, rename);
+    UNHOOK_SCT(sct, rename);preadpread
     UNHOOK_SCT(sct, lstat);
     */
+    UNHOOK_SCT(sct, pread64);
     UNHOOK_SCT(sct, read);
     UNHOOK_SCT(sct, write);
 
@@ -305,6 +318,21 @@ char *concat(char *pwd, char *filename)
     strcat(pwd, filename);
     return pwd;
 }
+asmlinkage long fake_pwrite64(unsigned int fd, const char __user *buf, size_t count, loff_t pos)
+{
+    char *path = get_filename_from_fd(fd);
+    if (isTarget(path))
+        fm_alert("pwrite64:%s\n", path);
+    return real_pwrite64(fd, buf, count, pos);
+}
+asmlinkage long fake_pread64(unsigned int fd, char __user *buf,
+                             size_t count, loff_t pos)
+{
+    char *path = get_filename_from_fd(fd);
+    if (isTarget(path))
+        fm_alert("pread64:%s\n", path);
+    return real_pread64(fd, buf, count, pos);
+}
 asmlinkage long
 fake_unlink(const char __user *pathname)
 {
@@ -322,7 +350,7 @@ asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count)
     {
         int i;
         long ret = real_read(fd, buf, count);
-        single_encrypt(NULL, buf, buf, ret);
+        single_decrypt(DEFAULT_PASS, buf, buf, ret);
         fm_alert("read:%s\n", path);
         fm_alert("count:%d\n", count);
         return ret;
@@ -332,13 +360,11 @@ asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count)
 asmlinkage long fake_write(unsigned int fd, const char __user *buf, size_t count)
 {
     char *path = get_filename_from_fd(fd);
-    if (path[0]!='/')
-        fm_alert("write_relative:%s\n", path);
     if (isTarget(path))
     {
         int i;
         char *decrypted = kmalloc(count, GFP_KERNEL);
-        single_decrypt(NULL, buf, decrypted, count);
+        single_encrypt(DEFAULT_PASS, buf, decrypted, count);
         //(struct NODE *)kmalloc(sizeof(struct NODE), GFP_KERNEL)
         mm_segment_t old_fs;
         old_fs = get_fs();

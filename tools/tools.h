@@ -16,7 +16,7 @@ typedef struct Message
 char *get_simpified_path(const char *absolute_path);
 int aes_encrypt(u8 *key, u8 *src, u8 *dst, int size);
 void aes_decrypt(u8 *key, u8 *src, u8 *dst, int size);
-void single_encrypt(char *key, char *src, char *dst, long length);
-void single_decrypt(char *key, char *src, char *dst, long length);
+int single_encrypt(char *key, char *src, char *dst, long length);
+int single_decrypt(char *key, char *src, char *dst, long length);
 
 #endif

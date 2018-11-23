@@ -7,30 +7,72 @@
 #include <linux/crypto.h>
 #include <linux/types.h>
 #define AES_BLOCK_SIZE 16
-void single_encrypt(char *key, char *src, char *dst, long length)
+#define N 256
+
+void swap_two_array(unsigned char *a, unsigned char *b)
 {
-    long i;
-    for (i = 0; i < length; i++)
-    {
-        dst[i] = (src[i] + 1) % 256;
-    }
+    int tmp = *a;
+    *a = *b;
+    *b = tmp;
 }
-void single_decrypt(char *key, char *src, char *dst, long length)
+int KSA(char *key, unsigned char *S, int n)
 {
-    long i;
-    for (i = 0; i < length; i++)
+
+    int len = strlen(key);
+    int j = 0;
+    int i;
+    for (i = 0; i < n; i++)
+        S[i] = i;
+
+    unsigned char tmp;
+    for (i = 0; i < n; i++)
     {
-        dst[i] = (src[i] - 1) % 256;
+        j = (j + S[i] + key[i % len]) % n;
+        swap_two_array(&S[i],&S[j]);
     }
+
+    return 0;
+}
+int get_encrypted(char *key, unsigned char *encrypted)
+{
+    KSA(key, encrypted, N);
+    return 0;
+}
+int get_decrypted(char *key, unsigned char *decrypted)
+{
+    unsigned char S[N];
+    int i;
+    KSA(key, S, N);
+    for (i = 0; i < N; i++)
+        decrypted[S[i]] = i;
+    return 0;
+}
+int single_encrypt(char *key, char *src, char *dst, long len)
+{
+    unsigned char encrypted[N];
+    long i;
+    get_encrypted(key, encrypted);
+    for (i = 0; i < len; i++)
+        dst[i] = encrypted[((unsigned char)src[i])];
+    return 0;
+}
+int single_decrypt(char *key, char *src, char *dst, long len)
+{
+    unsigned char decrypted[N];
+    long i;
+    get_decrypted(key, decrypted);
+    for (i = 0; i < len; i++)
+        dst[i] = decrypted[((unsigned char)src[i])];
+    return 0;
 }
 
-int aes_encrypt(u8 *key, u8 *src, u8 *dst, int size)
+int aes_encrypt(unsigned char *key, unsigned char *src, unsigned char *dst, int size)
 {
     struct crypto_cipher *tfm;
     tfm = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_ASYNC);
     crypto_cipher_setkey(tfm, key, 32);
-    u8 *plain = src;
-    u8 *enc = dst;
+    unsigned char *plain = src;
+    unsigned char *enc = dst;
     int count = size / AES_BLOCK_SIZE;
     int mod = size % AES_BLOCK_SIZE;
     if (mod > 0)
@@ -46,13 +88,13 @@ int aes_encrypt(u8 *key, u8 *src, u8 *dst, int size)
 
     return count * AES_BLOCK_SIZE;
 }
-void aes_decrypt(u8 *key, u8 *src, u8 *dst, int size)
+void aes_decrypt(unsigned char *key, unsigned char *src, unsigned char *dst, int size)
 {
     struct crypto_cipher *tfm;
     tfm = crypto_alloc_cipher("aes", 0, CRYPTO_ALG_ASYNC);
     crypto_cipher_setkey(tfm, key, 32);
-    u8 *plain = dst;
-    u8 *enc = src;
+    unsigned char *plain = dst;
+    unsigned char *enc = src;
     int count = size / AES_BLOCK_SIZE;
     int i;
 

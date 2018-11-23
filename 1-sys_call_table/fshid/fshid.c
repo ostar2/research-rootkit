@@ -38,6 +38,7 @@
 #define SECRET_FILE "safe"
 #define SAFE_DIR "/home/xytao/safe"
 #define SAFE_PARENT_DIR "/home/xytao"
+#define ALLOWED_UID 1000
 #define NETLINK_USER 31
 
 #define SAFE_APP_LOCATION "/home/xytao/linux-safe-desktop/node_modules/electron/dist/electron"
@@ -161,6 +162,11 @@ bool is_process_valid(struct task_struct *ts)
     }
     return false;
 }
+bool is_user_valid(void)
+{
+
+    return current_uid().val == ALLOWED_UID;
+}
 struct task_struct *get_struct_task_from_pid(int pid)
 {
     struct pid *pid_struct;
@@ -238,9 +244,10 @@ int init_module(void)
     /* No consideration on failure. */
     sct = get_sct();
     disable_wp();
-    /*
     HOOK_SCT(sct, link);
     HOOK_SCT(sct, unlink);
+    /*
+    
 
     HOOK_SCT(sct, getdents);
     HOOK_SCT(sct, stat);
@@ -263,9 +270,10 @@ void cleanup_module(void)
 {
     netlink_kernel_release(nl_sk);
     disable_wp();
-    /*
     UNHOOK_SCT(sct, link);
     UNHOOK_SCT(sct, unlink);
+    /*
+    
     UNHOOK_SCT(sct, getdents);
     UNHOOK_SCT(sct, stat);
     UNHOOK_SCT(sct, chdir);
@@ -308,12 +316,13 @@ fake_unlink(const char __user *pathname)
 
 asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count)
 {
+
     char *path = get_filename_from_fd(fd);
     if (isTarget(path))
     {
         int i;
         long ret = real_read(fd, buf, count);
-        single_encrypt(NULL,buf, buf, ret);
+        single_encrypt(NULL, buf, buf, ret);
         fm_alert("read:%s\n", path);
         fm_alert("count:%d\n", count);
         return ret;
@@ -321,12 +330,15 @@ asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count)
     return real_read(fd, buf, count);
 }
 asmlinkage long fake_write(unsigned int fd, const char __user *buf, size_t count)
-{   
+{
     char *path = get_filename_from_fd(fd);
+    if (path[0]!='/')
+        fm_alert("write_relative:%s\n", path);
     if (isTarget(path))
-    {   int i;
+    {
+        int i;
         char *decrypted = kmalloc(count, GFP_KERNEL);
-        single_decrypt(NULL,buf, decrypted, count);
+        single_decrypt(NULL, buf, decrypted, count);
         //(struct NODE *)kmalloc(sizeof(struct NODE), GFP_KERNEL)
         mm_segment_t old_fs;
         old_fs = get_fs();

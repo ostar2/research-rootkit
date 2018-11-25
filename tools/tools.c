@@ -223,13 +223,35 @@ int get_simpified_path(const char *absolute_path,char *simplified_path)
  * 
  * @param ts                the struct task_struct
  * @param filename          the filename
- * @param absolute_path     the absolute path result
+ * @param absolute_path     the absolute path result, must allocate memory before calling it
  * @return int              whether the function succeeds
  */
 int get_simplified_path_from_struct_task(struct task_struct *ts,const char*filename,char* absolute_path)
 {
     get_absolute_path(ts, filename, absolute_path);
     return get_simpified_path(absolute_path,absolute_path);
+}
+/**
+ * @brief Get the simplified path from struct task and directory's file descriptor and filename (either relative or absolute)
+ * 
+ * @param dfd               the directory's file descriptor
+ * @param ts                the struct task_struct
+ * @param filename          the filename
+ * @param absolute_path     the absolute path result, must allocate memory before calling it
+ * @return int              whether the function succeeds
+ */
+int get_simplified_path_from_directory_fd(int dfd, struct task_struct *ts, const char *filename, char *absolute_path)
+{
+    if (filename[0] == '/')//already absolute
+        strcpy(absolute_path, filename);
+    else
+    {   //relative
+        get_filename_from_fd(ts, dfd, absolute_path);//directory path
+        if (absolute_path[strlen(absolute_path) - 1] != '/') //not endwith '/'
+            strcat(absolute_path, "/");                      //add '/'
+        strcat(absolute_path, filename);
+    }
+    return get_simpified_path(absolute_path, absolute_path);
 }
 struct task_struct *get_struct_task_from_pid(int pid)
 {

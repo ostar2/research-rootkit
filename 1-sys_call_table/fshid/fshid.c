@@ -52,10 +52,20 @@ char SAFE_PARENT_DIR_NO_SLASH[PATH_MAX];
 struct sock *nl_sk = NULL;
 struct Message *message;
 unsigned long **sct;
+int opened_file_count = 0;
 
-/* open */
+/* create && open && close*/
+asmlinkage long fake_creat(const char __user *pathname, umode_t mode);
+asmlinkage long (*real_creat)(const char __user *filename, umode_t mode);
+
 asmlinkage long fake_open(const char __user *filename, int flags, umode_t mode);
 asmlinkage long (*real_open)(const char __user *filename, int flags, umode_t mode);
+
+asmlinkage long fake_openat(int dfd, const char __user *filename, int flags, umode_t mode);
+asmlinkage long (*real_openat)(int dfd, const char __user *filename, int flags, umode_t mode);
+
+asmlinkage long fake_close(unsigned int fd);
+asmlinkage long (*real_close)(unsigned int fd);
 
 /* read & write */
 asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count);
@@ -80,14 +90,14 @@ asmlinkage long (*real_linkat)(int olddfd, const char __user *oldname, int newdf
 asmlinkage long fake_symlink(const char __user *old, const char __user *new);
 asmlinkage long (*real_symlink)(const char __user *oldname, const char __user *newname);
 
-asmlinkage long fake_symlinkat(const char __user * oldname,int newdfd, const char __user * newname);
-asmlinkage long (*real_symlinkat)(const char __user * oldname,int newdfd, const char __user * newname);
+asmlinkage long fake_symlinkat(const char __user *oldname, int newdfd, const char __user *newname);
+asmlinkage long (*real_symlinkat)(const char __user *oldname, int newdfd, const char __user *newname);
 
 asmlinkage long fake_unlink(const char __user *pathname);
 asmlinkage long (*real_unlink)(const char __user *pathname);
 
-asmlinkage long fake_unlinkat(int dfd, const char __user * pathname, int flag);
-asmlinkage long (*real_unlinkat)(int dfd, const char __user * pathname, int flag);
+asmlinkage long fake_unlinkat(int dfd, const char __user *pathname, int flag);
+asmlinkage long (*real_unlinkat)(int dfd, const char __user *pathname, int flag);
 
 /* dir */
 asmlinkage long fake_chdir(const char __user *filename);
@@ -110,7 +120,6 @@ asmlinkage long (*real_lstat)(const char __user *filename, struct __old_kernel_s
 /* getdents */
 asmlinkage long fake_getdents(unsigned int fd, struct linux_dirent __user *dirent, unsigned int count);
 asmlinkage long (*real_getdents)(unsigned int fd, struct linux_dirent __user *dirent, unsigned int count);
-
 
 bool is_process_valid(struct task_struct *ts)
 {
@@ -175,7 +184,7 @@ static void on_receive(struct sk_buff *skb)
     if (res < 0)
         printk(KERN_INFO "Error while sending bak to user\n");
 }
-int init_netlink(void) 
+int init_netlink(void)
 {
     struct netlink_kernel_cfg cfg = {
         .input = on_receive,
@@ -202,7 +211,7 @@ void set_safedir(void)
 }
 int init_module(void)
 {
-    fm_alert("%s\n", "Greetings the World!");
+    fm_alert("%s\n", "The linux-safe-module is installed!");
     if (init_netlink() < 0)
         printk(KERN_ALERT "Error creating socket.\n");
     set_safedir();
@@ -216,7 +225,6 @@ int init_module(void)
     HOOK_SCT(sct, unlink);
     HOOK_SCT(sct, unlinkat);
 
-    
     HOOK_SCT(sct, getdents);
     HOOK_SCT(sct, chdir);
     HOOK_SCT(sct, mkdir);
@@ -225,6 +233,9 @@ int init_module(void)
     HOOK_SCT(sct, stat);
 
     HOOK_SCT(sct, open);
+    HOOK_SCT(sct,creat);
+    HOOK_SCT(sct, openat);
+    HOOK_SCT(sct, close);
     HOOK_SCT(sct, pread64);
     HOOK_SCT(sct, pwrite64);
     HOOK_SCT(sct, read);
@@ -247,7 +258,6 @@ void cleanup_module(void)
     UNHOOK_SCT(sct, unlink);
     UNHOOK_SCT(sct, unlinkat);
 
-    
     UNHOOK_SCT(sct, getdents);
     UNHOOK_SCT(sct, chdir);
     UNHOOK_SCT(sct, mkdir);
@@ -256,6 +266,9 @@ void cleanup_module(void)
     UNHOOK_SCT(sct, stat);
 
     UNHOOK_SCT(sct, open);
+    UNHOOK_SCT(sct,creat);
+    UNHOOK_SCT(sct, openat);
+    UNHOOK_SCT(sct, close);
     UNHOOK_SCT(sct, pread64);
     UNHOOK_SCT(sct, pwrite64);
     UNHOOK_SCT(sct, read);
@@ -268,91 +281,129 @@ void cleanup_module(void)
 }
 
 asmlinkage long fake_link(const char __user *oldname, const char __user *newname)
-{      
+{
     char full_new[PATH_MAX];
     char full_old[PATH_MAX];
-    get_simplified_path_from_struct_task(current,newname,full_new);
-    get_simplified_path_from_struct_task(current,oldname,full_old);
-    if ((is_target(full_new)||is_target(full_old))&&!is_process_valid(current)){
-        fm_alert("link: from-%s to-%s\n", full_old, full_new);
-        return -28;
+    get_simplified_path_from_struct_task(current, newname, full_new);
+    get_simplified_path_from_struct_task(current, oldname, full_old);
+    if ((is_target(full_old) || is_target(full_new)))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] linkat: from-%s to-%s\n", full_old, full_new);
+        else
+        {
+            fm_alert("[Invaild] linkat: from-%s to-%s, pid%d\n", full_old, full_new,current->pid);
+            return -28;
+        }
     }
-        
     return real_link(oldname, newname);
-} 
+}
 asmlinkage long fake_linkat(int olddfd, const char __user *oldname, int newdfd, const char __user *newname, int flags)
 {
     char full_new[PATH_MAX];
     char full_old[PATH_MAX];
-    get_simplified_path_from_struct_task(current,newname,full_new);
-    get_simplified_path_from_struct_task(current,oldname,full_old);
-    if ((is_target(full_new)||is_target(full_old))&&!is_process_valid(current)){
-        fm_alert("linkat: from-%s to-%s\n", full_old, full_new);
-        return -28;
+    get_simplified_path_from_directory_fd(newdfd,current, newname, full_new);
+    get_simplified_path_from_directory_fd(olddfd,current, oldname, full_old);
+    if ((is_target(full_old) || is_target(full_new)))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] linkat: from-%s to-%s\n", full_old, full_new);
+        else
+        {
+            fm_alert("[Invaild] linkat: from-%s to-%s, pid%d\n", full_old, full_new,current->pid);
+            return -28;
+        }
     }
     return real_linkat(olddfd, oldname, newdfd, newname, flags);
 }
-asmlinkage long fake_symlink(const char __user *old, const char __user *new){
+asmlinkage long fake_symlink(const char __user *old, const char __user *new)
+{
     char full_new[PATH_MAX];
     char full_old[PATH_MAX];
     get_simplified_path_from_struct_task(current, new, full_new);
     get_simplified_path_from_struct_task(current, old, full_old);
-    if ((is_target(full_new)||is_target(full_old))&&!is_process_valid(current)){
-        fm_alert("symlink: from-%s to-%s\n", full_old, full_new);
-        return -28;
+    if ((is_target(full_old) || is_target(full_new)))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] symlink: from-%s to-%s\n", full_old, full_new);
+        else
+        {
+            fm_alert("[Invaild] symlink: from-%s to-%s, pid%d\n", full_old, full_new,current->pid);
+            return -28;
+        }
     }
-    return real_symlink(old,new);
+    return real_symlink(old, new);
 }
-asmlinkage long fake_symlinkat(const char __user * oldname,int newdfd, const char __user * newname)
+asmlinkage long fake_symlinkat(const char __user *oldname, int newdfd, const char __user *newname)
 {
     char full_new[PATH_MAX];
     char full_old[PATH_MAX];
-    get_simplified_path_from_struct_task(current,newname,full_new);
-    get_simplified_path_from_struct_task(current,oldname,full_old);
-    if ((is_target(full_new)||is_target(full_old))&&!is_process_valid(current)){
-        fm_alert("symlinkat: from-%s to-%s\n", full_old, full_new);
-        return -28;
+    get_simplified_path_from_struct_task(current, newname, full_new);
+    get_simplified_path_from_directory_fd(newdfd,current, oldname, full_old);
+    if ((is_target(full_old) || is_target(full_new)))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] symlinkat: from-%s to-%s\n", full_old, full_new);
+        else
+        {
+            fm_alert("[Invaild] symlinkat: from-%s to-%s, pid%d\n", full_old, full_new,current->pid);
+            return -28;
+        }
     }
-    return real_symlinkat(oldname,newdfd,newname);
-
+    return real_symlinkat(oldname, newdfd, newname);
 }
 asmlinkage long fake_unlink(const char __user *pathname)
-{   char full[PATH_MAX];
-    get_simplified_path_from_struct_task(current,pathname,full);
-    if (is_target(full)&&!is_process_valid(current)){
-        fm_alert("unlink: %s\n", full);
-        return -28;
+{
+    char full[PATH_MAX];
+    get_simplified_path_from_struct_task(current, pathname, full);
+     if (is_target(full))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] unlink: %s\n", full);
+        else
+        {
+            fm_alert("[Invaild] unlink: %s, pid:%d\n", full, current->pid);
+            return -28;
+        }
     }
     return real_unlink(pathname);
 }
-asmlinkage long fake_unlinkat(int dfd, const char __user * pathname, int flag)
+asmlinkage long fake_unlinkat(int dfd, const char __user *pathname, int flag)
 {
     char full[PATH_MAX];
-    get_simplified_path_from_struct_task(current,pathname,full);
-    if (is_target(full)&&!is_process_valid(current)){
-        fm_alert("unlinkat: %s\n", full);
-        return -28;
+    get_simplified_path_from_directory_fd(dfd,current, pathname, full);
+    if (is_target(full))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] unlinkat: %s\n", full);
+        else
+        {
+            fm_alert("[Invaild] unlinkat: %s, pid:%d\n", full, current->pid);
+            return -28;
+        }
     }
-    return real_unlinkat(dfd,pathname,flag);
+    return real_unlinkat(dfd, pathname, flag);
 }
 
 asmlinkage long fake_pwrite64(unsigned int fd, const char __user *buf, size_t count, loff_t pos)
 {
     char path[PATH_MAX];
     get_filename_from_fd(current, fd, path);
-    if (is_target(path)&&!is_process_valid(current)){
-        fm_alert("pwrite64:%s\n", path);
+    if (is_target(path) && !is_process_valid(current))
+    {
+        fm_alert("[Invaild] pwrite64:%s, pid:%d\n", path,current->pid);
         return -28;
     }
-    if (is_target(path)&&is_process_valid(current)){
+    if (is_target(path) && is_process_valid(current))
+    {
         char *decrypted = kmalloc(count, GFP_KERNEL);
         single_encrypt(DEFAULT_PASS, buf, decrypted, count);
         mm_segment_t old_fs;
         old_fs = get_fs();
         set_fs(KERNEL_DS);
-        long ret = real_pwrite64(fd, decrypted, count,pos);
+        long ret = real_pwrite64(fd, decrypted, count, pos);
         set_fs(old_fs);
-        fm_alert("pwrite64:%s\n", path);
+        fm_alert("[Vaild] pwrite64:%s\n", path);
         return ret;
     }
     return real_pwrite64(fd, buf, count, pos);
@@ -361,14 +412,16 @@ asmlinkage long fake_pread64(unsigned int fd, char __user *buf, size_t count, lo
 {
     char path[PATH_MAX];
     get_filename_from_fd(current, fd, path);
-    if (is_target(path)&&!is_process_valid(current)){
-        fm_alert("pread64:%s\n", path);
+    if (is_target(path) && !is_process_valid(current))
+    {
+        fm_alert("[Invaild] pread64:%s, pid:%d\n", path,current->pid);
         return -28;
     }
-    if (is_target(path)&&is_process_valid(current)){
-        long ret = real_pread64(fd, buf, count,pos);
+    if (is_target(path) && is_process_valid(current))
+    {
+        long ret = real_pread64(fd, buf, count, pos);
         single_decrypt(DEFAULT_PASS, buf, buf, ret);
-        fm_alert("pread64:%s\n", path);
+        fm_alert("[Vaild] pread64:%s\n", path);
         return ret;
     }
     return real_pread64(fd, buf, count, pos);
@@ -378,15 +431,16 @@ asmlinkage long fake_read(unsigned int fd, char __user *buf, size_t count)
 {
     char path[PATH_MAX];
     get_filename_from_fd(current, fd, path);
-    if (is_target(path)&&!is_process_valid(current)){
-        fm_alert("read:%s\n", path);
+    if (is_target(path) && !is_process_valid(current))
+    {
+        fm_alert("[Invaild] read:%s, pid:%d\n", path,current->pid);
         return -28;
     }
-    if (is_target(path)&&is_process_valid(current))
+    if (is_target(path) && is_process_valid(current))
     {
         long ret = real_read(fd, buf, count);
         single_decrypt(DEFAULT_PASS, buf, buf, ret);
-        fm_alert("read:%s\n", path);
+        fm_alert("[Vaild] read:%s\n", path);
         return ret;
     }
     return real_read(fd, buf, count);
@@ -395,11 +449,12 @@ asmlinkage long fake_write(unsigned int fd, const char __user *buf, size_t count
 {
     char path[PATH_MAX];
     get_filename_from_fd(current, fd, path);
-    if (is_target(path)&&!is_process_valid(current)){
-        fm_alert("write:%s\n", path);
+    if (is_target(path) && !is_process_valid(current))
+    {
+        fm_alert("[Invaild] write:%s, pid:%d\n", path,current->pid);
         return -28;
     }
-    if (is_target(path)&&is_process_valid(current))
+    if (is_target(path) && is_process_valid(current))
     {
         char *decrypted = kmalloc(count, GFP_KERNEL);
         single_encrypt(DEFAULT_PASS, buf, decrypted, count);
@@ -408,20 +463,25 @@ asmlinkage long fake_write(unsigned int fd, const char __user *buf, size_t count
         set_fs(KERNEL_DS);
         long ret = real_write(fd, decrypted, count);
         set_fs(old_fs);
-        fm_alert("write:%s\n", path);
+        fm_alert("[Vaild] write:%s\n", path);
         return ret;
     }
     return real_write(fd, buf, count);
 }
 
 asmlinkage long fake_lstat(const char __user *filename, struct __old_kernel_stat __user *statbuf)
-{    
+{
     char full[PATH_MAX];
-    get_simplified_path_from_struct_task(current,filename,full);
-    if (is_target(full) && !is_process_valid(current))
-    {
-        fm_alert("lstat: %s\n", filename);
-        return -28;
+    get_simplified_path_from_struct_task(current, filename, full);
+    if (is_target(full))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] lstat: %s\n", full);
+        else
+        {
+            fm_alert("[Invaild] lstat: %s, pid:%d\n", full, current->pid);
+            return -28;
+        }
     }
     return real_lstat(filename, statbuf);
 }
@@ -429,12 +489,18 @@ asmlinkage long fake_rename(const char __user *oldname, const char __user *newna
 {
     char full_old[PATH_MAX];
     char full_new[PATH_MAX];
-    get_simplified_path_from_struct_task(current,oldname,full_old);
-    get_simplified_path_from_struct_task(current,newname,full_new);
-    if ((is_target(full_old) ||is_target(full_new)) &&!is_process_valid(current))
-    {
-        fm_alert("rename: from-%s to-%s\n", full_old, full_new);
-        return -1;
+    get_simplified_path_from_struct_task(current, oldname, full_old);
+    get_simplified_path_from_struct_task(current, newname, full_new);
+    
+    if ((is_target(full_old) || is_target(full_new)))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] rename: from-%s to-%s\n", full_old, full_new);
+        else
+        {
+            fm_alert("[Invaild] rename: from-%s to-%s, pid%d\n", full_old, full_new,current->pid);
+            return -28;
+        }
     }
     return real_rename(oldname, newname);
 }
@@ -442,62 +508,173 @@ asmlinkage long fake_rename(const char __user *oldname, const char __user *newna
 asmlinkage long fake_mkdir(const char __user *pathname, umode_t mode)
 {
     char full[PATH_MAX];
-    get_simplified_path_from_struct_task(current,pathname,full);
-    if (is_target(full) && !is_process_valid(current))
-    {
-        fm_alert("mkdir: %s\n", pathname);
-        return -25;
+    get_simplified_path_from_struct_task(current, pathname, full);
+    if (is_target(full))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] mkdir: %s\n", full);
+        else
+        {
+            fm_alert("[Invaild] mkdir: %s, pid:%d\n", full, current->pid);
+            return -28;
+        }
     }
     return real_mkdir(pathname, mode);
 }
-
-asmlinkage long fake_open(const char __user *filename, int flags, umode_t mode)
-{   
+asmlinkage long fake_creat(const char __user *pathname, umode_t mode)
+{
     char full[PATH_MAX];
-    get_simplified_path_from_struct_task(current,filename,full);
-    if (is_target(full) && !is_process_valid(current))
+    get_simplified_path_from_struct_task(current, pathname, full);
+    if (is_target(full))
     {
-        fm_alert("open: %s\n", filename);
-        return -2;
+        if (is_process_valid(current))
+        {
+            long ret = real_creat(pathname, mode);
+            if (ret > 0)
+            { //open succeeded
+                opened_file_count++;
+                fm_alert("[Vaild] creat: %s\n", full);
+                fm_alert("[Vaild] files: %d\n", opened_file_count);
+            }
+            return ret;
+        }
+        else
+        {
+            fm_alert("[Invaild] creat: %s\n", full);
+            return -28;
+        }
+    }
+    return real_creat(pathname, mode);
+}
+asmlinkage long fake_openat(int dfd, const char __user *filename, int flags, umode_t mode)
+{
+    
+    char full[PATH_MAX];
+    get_simplified_path_from_directory_fd( dfd, current, filename,full);
+    if (is_target(full))
+    {
+        if (is_process_valid(current))
+        {
+            long ret = real_openat(dfd, filename, flags, mode);
+            if (ret > 0)
+            { //openat succeeded
+                opened_file_count++;
+                fm_alert("[Vaild] openat: %s\n", full);
+                fm_alert("[Vaild] files: %d\n", opened_file_count);
+            }
+            return ret;
+        }
+        else
+        {
+            fm_alert("[Invaild] openat: %s\n", full);
+            return -28;
+        }
+    }
+    return real_openat(dfd, filename, flags, mode);
+}
+asmlinkage long fake_open(const char __user *filename, int flags, umode_t mode)
+{
+    char full[PATH_MAX];
+    get_simplified_path_from_struct_task(current, filename, full);
+    if (is_target(full))
+    {
+        if (is_process_valid(current))
+        {
+            long ret = real_open(filename, flags, mode);
+            if (ret > 0)
+            { //open succeeded
+                opened_file_count++;
+                fm_alert("[Vaild] open: %s\n", full);
+                fm_alert("[Vaild] files: %d\n", opened_file_count);
+            }
+            return ret;
+        }
+        else
+        {
+            fm_alert("[Invaild] open: %s\n", full);
+            return -28;
+        }
     }
     return real_open(filename, flags, mode);
+}
+asmlinkage long fake_close(unsigned int fd)
+{
+    char path[PATH_MAX];
+    get_filename_from_fd(current, fd, path);
+    if (is_target(path))
+    {
+        if (is_process_valid(current))
+        {
+            long ret = real_close(fd);
+            if (ret == 0)
+            { //close succeeded
+                opened_file_count--;
+                fm_alert("[Vaild] close: %s,fd:%d\n", path, fd);
+                fm_alert("[Vaild] files: %d\n", opened_file_count);
+            }
+            return ret;
+        }
+        else
+        {
+            fm_alert("[Invaild] close: %s\n", path);
+            return -28;
+        }
+    }
+    return real_close(fd);
 }
 asmlinkage long fake_chdir(const char __user *filename)
 {
     char full[PATH_MAX];
-    get_simplified_path_from_struct_task(current,filename,full);
-    
-    if (is_target(full) && !is_process_valid(current))
+    get_simplified_path_from_struct_task(current, filename, full);
+    if (is_target(full))
     {   
-        fm_alert("chdir: %s\n", full);
-        return -2;
+        if (is_process_valid(current))
+            fm_alert("[Vaild] chdir: %s\n", full);
+        else
+        {
+            fm_alert("[Invaild] chdir: %s, pid:%d\n", full, current->pid);
+            return -28;
+        }
     }
     return real_chdir(filename);
 }
 asmlinkage long fake_stat(const char __user *filename, struct __old_kernel_stat __user *statbuf)
 {
     char full[PATH_MAX];
-    get_simplified_path_from_struct_task(current,filename,full);
-    if (is_target(full) && !is_process_valid(current))
-    {
-        return -2;
+    get_simplified_path_from_struct_task(current, filename, full);
+    if (is_target(full))
+    {   
+        if (is_process_valid(current))
+            fm_alert("[Vaild] stat: %s\n", full);
+        else
+        {
+            fm_alert("[Invaild] stat: %s, pid:%d\n", full, current->pid);
+            return -28;
+        }
     }
     return real_stat(filename, statbuf);
 }
 
-
 asmlinkage long
-fake_getdents(unsigned int fd,struct linux_dirent __user *dirent,unsigned int count)
-{   
+fake_getdents(unsigned int fd, struct linux_dirent __user *dirent, unsigned int count)
+{
     char pathname[PATH_MAX];
-    get_filename_from_fd(current,fd,pathname);
-    fm_alert("getdents: %s\n", pathname);
+    get_filename_from_fd(current, fd, pathname);
     long ret;
     ret = real_getdents(fd, dirent, count);
-    if (is_target(pathname) && !is_process_valid(current))
-        return 0;
+    if (is_target(pathname) )
+    {   if (is_process_valid(current))
+            fm_alert("[Vaild] getdents: %s\n", pathname);
+        else
+        {
+            fm_alert("[Invaild] getdents: %s, pid:%d\n", pathname, current->pid);
+            return 0;
+        }
+    }
     if (!strcmp(pathname, SAFE_PARENT_DIR_NO_SLASH) || !strcmp(pathname, SAFE_PARENT_DIR_SLASH))
+    {
         ret = remove_dent(SECRET_FILE, dirent, ret);
-
+        fm_alert("[Invaild] getdents: %s, pid:%d\n", pathname, current->pid);
+    }
     return ret;
 }
